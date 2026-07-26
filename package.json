@@ -1,0 +1,12 @@
+{
+  "name": "bomb-appetit-relay",
+  "version": "1.0.0",
+  "description": "Room-code relay server for Bomb Appetit online multiplayer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  }
+}
