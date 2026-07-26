@@ -1,8 +1,9 @@
-// Bomb Appetit — tiny relay server (room codes, 2 players per room)
+// Bomb Appetit — tiny relay server (room codes + quick match, 2 players per room)
 const { WebSocketServer } = require("ws");
 const port = process.env.PORT || 8080;
 const wss = new WebSocketServer({ port });
 const rooms = new Map(); // code -> { host, guest }
+let queue = [];          // sockets waiting for Quick Match
 
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I/O to avoid confusion
 function makeCode() {
@@ -13,6 +14,15 @@ function makeCode() {
 
 function sendJson(ws, obj) {
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj) + "\0");
+}
+
+function pairUp(hostWs, guestWs) {
+    const code = makeCode();
+    rooms.set(code, { host: hostWs, guest: guestWs });
+    hostWs.room = code;  hostWs.isHost = true;
+    guestWs.room = code; guestWs.isHost = false;
+    sendJson(hostWs, { cmd: "paired", isHost: true });
+    sendJson(guestWs, { cmd: "paired", isHost: false });
 }
 
 wss.on("connection", (ws) => {
@@ -41,8 +51,20 @@ wss.on("connection", (ws) => {
             r.guest = ws;
             ws.room = code;
             ws.isHost = false;
-            sendJson(ws, { cmd: "paired" });
-            sendJson(r.host, { cmd: "paired" });
+            sendJson(r.host, { cmd: "paired", isHost: true });
+            sendJson(ws, { cmd: "paired", isHost: false });
+            return;
+        }
+        if (m && m.cmd === "quickmatch") {
+            if (ws.room) return; // duplicate hello
+            while (queue.length > 0 && queue[0].readyState !== 1) queue.shift(); // drop stale entries
+            if (queue.length > 0) {
+                const partner = queue.shift();
+                pairUp(partner, ws);
+            } else {
+                queue.push(ws);
+                sendJson(ws, { cmd: "searching" });
+            }
             return;
         }
 
@@ -54,6 +76,7 @@ wss.on("connection", (ws) => {
     });
 
     ws.on("close", () => {
+        queue = queue.filter((s) => s !== ws);
         const r = rooms.get(ws.room);
         if (!r) return;
         const peer = ws.isHost ? r.guest : r.host;
